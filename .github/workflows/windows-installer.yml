@@ -39,6 +39,15 @@ jobs:
         with:
           node-version: 22
 
+      - name: Check JavaScript syntax
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path api,lib,electron -Recurse -File -Filter *.js | ForEach-Object {
+            Write-Host "Checking $($_.FullName)"
+            node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
