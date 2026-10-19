@@ -8,6 +8,7 @@ on:
     paths:
       - 'api/**'
       - 'lib/**'
+      - 'tests/**'
       - 'electron/**'
       - 'package.json'
       - 'package-lock.json'
