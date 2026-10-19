@@ -31,6 +31,7 @@ test('signed sessions reject tampering and expired payloads', () => {
     assert.equal(verify(token)?.uid, 7);
     const tampered = token.slice(0, -1) + (token.endsWith('a') ? 'b' : 'a');
     assert.equal(verify(tampered), null);
+    assert.equal(verify(token + '.extra'), null);
     const expired = sign({ uid: 7, usuario: 'tester', rol: 'A', exp: Date.now() - 1 });
     assert.equal(verify(expired), null);
   } finally {
