@@ -48,6 +48,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      - name: Test authentication and session security
+        run: node --test tests/auth.test.js
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
