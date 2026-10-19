@@ -5,7 +5,7 @@ module.exports=async function(req,res){
   const session=verify(getCookie(req,'erp_session'));
   if(!session) return res.status(401).json({error:'Sesión requerida'});
   const actor=rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? AND activo=1 LIMIT 1',params:[session.uid]}]))[0];
-  if(!actor || actor.usuario!==session.usuario || !['J','A'].includes(actor.rol)) return res.status(403).json({error:'Se requiere Jefe o Administrador activo'});
+  if(!actor || actor.usuario!==session.usuario || actor.rol!==session.rol || !['J','A'].includes(actor.rol)) return res.status(403).json({error:'Se requiere Jefe o Administrador activo'});
   const b=parseBody(req), action=String(b.action||'');
   try{
     if(action==='save'){
