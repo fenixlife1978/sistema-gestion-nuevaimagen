@@ -64,7 +64,7 @@ module.exports = async function handler(req, res) {
       return /^(SELECT|PRAGMA)\b/i.test(normalized);
     });
     if (!readonly) {
-      return res.status(403).json({ error: 'El proxy Turso solo permite consultas de lectura' });
+      return res.status(403).json({ error: 'El proxy Turso solo permite consultas SELECT' });
     }
 
     // Nunca permitir pedir explícitamente el hash de contraseña, ni siquiera
