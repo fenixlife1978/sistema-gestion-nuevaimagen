@@ -564,6 +564,15 @@ module.exports=async function handler(req,res){
       const session=verify(getCookie(req,'erp_session'));
       if(!session) return res.status(401).json({ok:false,error:'Sesión requerida'});
       if(!['J','A'].includes(session.rol)) return res.status(403).json({ok:false,error:'Se requiere autorización J/A'});
+      // Una firma válida no basta: el usuario podría haber sido desactivado
+      // o eliminado después de emitirse la cookie.
+      const active=rowsFrom(await turso([{
+        q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? LIMIT 1',
+        params:[session.uid]
+      }]))[0];
+      if(!active||Number(active.activo)!==1||active.usuario!==session.usuario||active.rol!==session.rol){
+        return res.status(401).json({ok:false,error:'La sesión administrativa ya no está autorizada'});
+      }
     }
     await execSchema();
     if(req.internalBootstrap===true)return {ok:true,ready:true};
