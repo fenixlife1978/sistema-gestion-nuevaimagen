@@ -352,6 +352,25 @@ const COMITE_CARGOS=['COORDINADOR','RESPONSABLE DE ORGANIZACIÓN','RESPONSABLE E
 
 const BOOTSTRAP_VERSION = '2026-10-02-f';
 
+async function ensureInitialAdmin(){
+  const users=rowsFrom(await turso([{q:'SELECT COUNT(*) AS n FROM usuarios',params:[]}]));
+  if(Number(users[0]?.n||0)!==0) return;
+  // Nunca crear credenciales públicas/conocidas por defecto. La instalación
+  // inicial exige credenciales de administrador definidas como secretos de entorno.
+  const seedUser=String(process.env.INITIAL_ADMIN_USER||'').trim();
+  const seedPassword=String(process.env.INITIAL_ADMIN_PASSWORD||'');
+  if(!seedUser||!seedPassword){
+    throw new Error('Base de datos sin usuarios: configure INITIAL_ADMIN_USER e INITIAL_ADMIN_PASSWORD como variables de entorno para crear el administrador inicial de forma segura.');
+  }
+  if(seedUser.length>120||seedPassword.length<12||seedPassword.length>512){
+    throw new Error('Credenciales iniciales inválidas: el usuario debe tener hasta 120 caracteres y la contraseña entre 12 y 512 caracteres.');
+  }
+  await turso([{
+    q:'INSERT OR IGNORE INTO usuarios(usuario,clave_hash,nombre,rol,cargo) VALUES(?,?,?,?,?)',
+    params:[seedUser,modernHash(seedPassword),'Administrador del Sistema','A','Administrador']
+  }]);
+}
+
 async function execSchema() {
   // La tabla de metadatos debe existir antes de consultarla. En una base
   // existente sin erp_bootstrap_meta, la consulta anterior provocaba un
@@ -365,7 +384,7 @@ async function execSchema() {
   // El bootstrap debe ser idempotente y rápido en cada carga. Si la versión
   // ya fue aplicada, no volvemos a ejecutar todas las migraciones contra Turso.
   const meta=rowsFrom(await turso([{q:"SELECT version FROM erp_bootstrap_meta WHERE id=1 LIMIT 1",params:[]}]));
-  if(String(meta[0]?.version||'')===BOOTSTRAP_VERSION) return;
+  if(String(meta[0]?.version||'')===BOOTSTRAP_VERSION){ await ensureInitialAdmin(); return; }
 
   // Bases existentes ya funcionales no deben volver a ejecutar todo SCHEMA.
   // Eso implicaba decenas de round-trips a Turso y podía dejar el arranque
@@ -528,23 +547,7 @@ async function execSchema() {
     await turso([{q:'INSERT OR IGNORE INTO catalogo_problemas(categoria,nombre,orden) VALUES(?,?,?)',params:[categoria,nombre,i+1]}]);
   }
 
-  const users=rowsFrom(await turso([{q:'SELECT COUNT(*) AS n FROM usuarios',params:[]}]));
-  if(Number(users[0]?.n||0)===0){
-    // Nunca crear credenciales públicas/conocidas por defecto. La instalación
-    // inicial exige credenciales de administrador definidas como secretos de entorno.
-    const seedUser=String(process.env.INITIAL_ADMIN_USER||'').trim();
-    const seedPassword=String(process.env.INITIAL_ADMIN_PASSWORD||'');
-    if(!seedUser||!seedPassword){
-      throw new Error('Base de datos sin usuarios: configure INITIAL_ADMIN_USER e INITIAL_ADMIN_PASSWORD como variables de entorno para crear el administrador inicial de forma segura.');
-    }
-    if(seedUser.length>120||seedPassword.length<12||seedPassword.length>512){
-      throw new Error('Credenciales iniciales inválidas: el usuario debe tener hasta 120 caracteres y la contraseña entre 12 y 512 caracteres.');
-    }
-    await turso([{
-      q:'INSERT OR IGNORE INTO usuarios(usuario,clave_hash,nombre,rol,cargo) VALUES(?,?,?,?,?)',
-      params:[seedUser,modernHash(seedPassword),'Administrador del Sistema','A','Administrador']
-    }]);
-  }
+  await ensureInitialAdmin();
   await turso([{q:"INSERT OR REPLACE INTO erp_bootstrap_meta(id,version) VALUES(1,?)",params:[BOOTSTRAP_VERSION]}]);
 }
 
