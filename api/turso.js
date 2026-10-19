@@ -1,4 +1,4 @@
-const {turso,verify,getCookie}=require('../lib/auth');
+const {turso,rowsFrom,verify,getCookie}=require('../lib/auth');
 
 module.exports = async function handler(req, res) {
   // Este endpoint es un proxy SQL de alto privilegio. El origen CORS por sí
@@ -30,6 +30,10 @@ module.exports = async function handler(req, res) {
   try {
     const session = verify(getCookie(req,'erp_session'));
     if (!session) return res.status(401).json({ error: 'Sesión requerida' });
+    const activeUser = rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? LIMIT 1',params:[session.uid]}]))[0];
+    if (!activeUser || Number(activeUser.activo)!==1 || activeUser.usuario!==session.usuario || activeUser.rol!==session.rol) {
+      return res.status(401).json({ error: 'La sesión ya no está autorizada' });
+    }
     if (!['J','A','O','C'].includes(session.rol)) {
       return res.status(403).json({ error: 'Rol de sesión no permitido' });
     }
