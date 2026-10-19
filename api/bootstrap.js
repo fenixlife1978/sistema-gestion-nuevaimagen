@@ -353,22 +353,49 @@ const COMITE_CARGOS=['COORDINADOR','RESPONSABLE DE ORGANIZACIÓN','RESPONSABLE E
 const BOOTSTRAP_VERSION = '2026-10-02-f';
 
 async function ensureInitialAdmin(){
-  const users=rowsFrom(await turso([{q:'SELECT COUNT(*) AS n FROM usuarios',params:[]}]));
-  if(Number(users[0]?.n||0)!==0) return;
-  // Nunca crear credenciales públicas/conocidas por defecto. La instalación
-  // inicial exige credenciales de administrador definidas como secretos de entorno.
   const seedUser=String(process.env.INITIAL_ADMIN_USER||'').trim();
   const seedPassword=String(process.env.INITIAL_ADMIN_PASSWORD||'');
-  if(!seedUser||!seedPassword){
-    throw new Error('Base de datos sin usuarios: configure INITIAL_ADMIN_USER e INITIAL_ADMIN_PASSWORD como variables de entorno para crear el administrador inicial de forma segura.');
+  const users=rowsFrom(await turso([{q:'SELECT COUNT(*) AS n FROM usuarios',params:[]}]));
+  const userCount=Number(users[0]?.n||0);
+
+  // Nunca crear credenciales públicas/conocidas por defecto. La instalación
+  // inicial exige credenciales de administrador definidas como secretos de entorno.
+  if(userCount===0){
+    if(!seedUser||!seedPassword){
+      throw new Error('Base de datos sin usuarios: configure INITIAL_ADMIN_USER e INITIAL_ADMIN_PASSWORD como variables de entorno para crear el administrador inicial de forma segura.');
+    }
+    if(seedUser.length>120||seedPassword.length<12||seedPassword.length>512){
+      throw new Error('Credenciales iniciales inválidas: el usuario debe tener hasta 120 caracteres y la contraseña entre 12 y 512 caracteres.');
+    }
+    await turso([{
+      q:'INSERT OR IGNORE INTO usuarios(usuario,clave_hash,nombre,rol,cargo) VALUES(?,?,?,?,?)',
+      params:[seedUser,modernHash(seedPassword),'Administrador del Sistema','A','Administrador']
+    }]);
+    return;
   }
+
+  // Migración única y acotada para instalaciones nuevas que ya arrancaron con
+  // la semilla histórica de main. Solo toca la cuenta predeterminada si es el
+  // único usuario; nunca modifica cuentas personalizadas ni borra datos.
+  if(userCount!==1||!seedUser||!seedPassword) return;
   if(seedUser.length>120||seedPassword.length<12||seedPassword.length>512){
     throw new Error('Credenciales iniciales inválidas: el usuario debe tener hasta 120 caracteres y la contraseña entre 12 y 512 caracteres.');
   }
+  await turso([{q:`CREATE TABLE IF NOT EXISTS erp_admin_seed_migration (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    completed_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,params:[]}]);
+  const migrated=rowsFrom(await turso([{q:'SELECT id FROM erp_admin_seed_migration WHERE id=1 LIMIT 1',params:[]}]));
+  if(migrated.length) return;
+  const onlyUser=rowsFrom(await turso([{q:'SELECT id,usuario,rol FROM usuarios LIMIT 2',params:[]}]));
+  if(onlyUser.length!==1||onlyUser[0].usuario!=='admin@comando.com'||!['A','J'].includes(String(onlyUser[0].rol))) return;
   await turso([{
-    q:'INSERT OR IGNORE INTO usuarios(usuario,clave_hash,nombre,rol,cargo) VALUES(?,?,?,?,?)',
-    params:[seedUser,modernHash(seedPassword),'Administrador del Sistema','A','Administrador']
+    q:'UPDATE usuarios SET usuario=?,clave_hash=?,nombre=?,rol=?,cargo=? WHERE id=? AND usuario=?',
+    params:[seedUser,modernHash(seedPassword),'Administrador del Sistema','A','Administrador',onlyUser[0].id,'admin@comando.com']
   }]);
+  const verified=rowsFrom(await turso([{q:'SELECT id FROM usuarios WHERE usuario=? AND activo=1 LIMIT 1',params:[seedUser]}]));
+  if(!verified.length) throw new Error('No se pudo verificar la migración de la cuenta administrativa inicial.');
+  await turso([{q:'INSERT OR IGNORE INTO erp_admin_seed_migration(id) VALUES(1)',params:[]}]);
 }
 
 async function execSchema() {
