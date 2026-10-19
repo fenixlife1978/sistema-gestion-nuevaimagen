@@ -67,6 +67,13 @@ module.exports = async function handler(req, res) {
       return res.status(403).json({ error: 'El proxy Turso solo permite consultas de lectura' });
     }
 
+    // Nunca permitir pedir explícitamente el hash de contraseña, ni siquiera
+    // con alias o dentro de una consulta JOIN. SELECT * se conserva por
+    // compatibilidad, pero abajo se elimina la columna sensible del resultado.
+    if (stmts.some(({ q }) => /\\bclave_hash\\b/i.test(q))) {
+      return res.status(403).json({ error: 'La columna de credenciales no está disponible mediante el proxy' });
+    }
+
     // Usar exactamente el mismo cliente Turso que las demás rutas del sistema.
     // Así TURSO_URL/TURSO_DATABASE_URL y TURSO_TOKEN/TURSO_AUTH_TOKEN
     // siempre apuntan al mismo origen de datos.
@@ -75,7 +82,22 @@ module.exports = async function handler(req, res) {
     // sentencia devuelve un objeto {results:{columns,rows}} y para varias,
     // un arreglo de esos objetos. No exponer directamente la envoltura del
     // pipeline HTTP de Turso porque el frontend espera poder recorrerla.
-    const out = Array.isArray(data?.statements) ? data.statements : [];
+    const out = (Array.isArray(data?.statements) ? data.statements : []).map(statement => {
+      const result = statement?.results;
+      const columns = Array.isArray(result?.columns) ? result.columns : [];
+      const rows = Array.isArray(result?.rows) ? result.rows : [];
+      const safeIndexes = columns.map((name, index) => ({ name, index }))
+        .filter(column => String(column.name || '').toLowerCase() !== 'clave_hash');
+      // Protección adicional para SELECT * / u.* y consultas con JOIN.
+      return {
+        ...statement,
+        results: {
+          ...result,
+          columns: safeIndexes.map(column => column.name),
+          rows: rows.map(row => safeIndexes.map(column => row[column.index]))
+        }
+      };
+    });
     return res.status(200).json(Array.isArray(statements) ? out : (out[0] || {results:{columns:[],rows:[]}}));
   } catch (e) {
     return res.status(500).json({ error: e.message });
