@@ -70,7 +70,7 @@ module.exports = async function handler(req, res) {
     // Nunca permitir pedir explícitamente el hash de contraseña, ni siquiera
     // con alias o dentro de una consulta JOIN. SELECT * se conserva por
     // compatibilidad, pero abajo se elimina la columna sensible del resultado.
-    if (stmts.some(({ q }) => /\\bclave_hash\\b/i.test(q))) {
+    if (stmts.some(({ q }) => /\bclave_hash\b/i.test(q))) {
       return res.status(403).json({ error: 'La columna de credenciales no está disponible mediante el proxy' });
     }
 
