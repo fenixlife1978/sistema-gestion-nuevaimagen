@@ -1,4 +1,4 @@
-const {turso,verify,getCookie}=require('../lib/auth');
+const {turso,rowsFrom,verify,getCookie}=require('../lib/auth');
 
 module.exports = async function handler(req, res) {
   // Este endpoint es un proxy SQL de alto privilegio. El origen CORS por sí
@@ -30,6 +30,10 @@ module.exports = async function handler(req, res) {
   try {
     const session = verify(getCookie(req,'erp_session'));
     if (!session) return res.status(401).json({ error: 'Sesión requerida' });
+    const activeUser = rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? LIMIT 1',params:[session.uid]}]))[0];
+    if (!activeUser || Number(activeUser.activo)!==1 || activeUser.usuario!==session.usuario || activeUser.rol!==session.rol) {
+      return res.status(401).json({ error: 'La sesión ya no está autorizada' });
+    }
     if (!['J','A','O','C'].includes(session.rol)) {
       return res.status(403).json({ error: 'Rol de sesión no permitido' });
     }
@@ -57,10 +61,17 @@ module.exports = async function handler(req, res) {
     // exponerse como SQL arbitrario desde el navegador.
     const readonly = stmts.every(({ q }) => {
       const normalized = q.trim().replace(/^\uFEFF/, '');
-      return /^(SELECT|PRAGMA)\b/i.test(normalized);
+      return /^SELECT\b/i.test(normalized);
     });
     if (!readonly) {
-      return res.status(403).json({ error: 'El proxy Turso solo permite consultas de lectura' });
+      return res.status(403).json({ error: 'El proxy Turso solo permite consultas SELECT' });
+    }
+
+    // Nunca permitir pedir explícitamente el hash de contraseña, ni siquiera
+    // con alias o dentro de una consulta JOIN. SELECT * se conserva por
+    // compatibilidad, pero abajo se elimina la columna sensible del resultado.
+    if (stmts.some(({ q }) => /\bclave_hash\b/i.test(q))) {
+      return res.status(403).json({ error: 'La columna de credenciales no está disponible mediante el proxy' });
     }
 
     // Usar exactamente el mismo cliente Turso que las demás rutas del sistema.
@@ -71,7 +82,22 @@ module.exports = async function handler(req, res) {
     // sentencia devuelve un objeto {results:{columns,rows}} y para varias,
     // un arreglo de esos objetos. No exponer directamente la envoltura del
     // pipeline HTTP de Turso porque el frontend espera poder recorrerla.
-    const out = Array.isArray(data?.statements) ? data.statements : [];
+    const out = (Array.isArray(data?.statements) ? data.statements : []).map(statement => {
+      const result = statement?.results;
+      const columns = Array.isArray(result?.columns) ? result.columns : [];
+      const rows = Array.isArray(result?.rows) ? result.rows : [];
+      const safeIndexes = columns.map((name, index) => ({ name, index }))
+        .filter(column => String(column.name || '').toLowerCase() !== 'clave_hash');
+      // Protección adicional para SELECT * / u.* y consultas con JOIN.
+      return {
+        ...statement,
+        results: {
+          ...result,
+          columns: safeIndexes.map(column => column.name),
+          rows: rows.map(row => safeIndexes.map(column => row[column.index]))
+        }
+      };
+    });
     return res.status(200).json(Array.isArray(statements) ? out : (out[0] || {results:{columns:[],rows:[]}}));
   } catch (e) {
     return res.status(500).json({ error: e.message });

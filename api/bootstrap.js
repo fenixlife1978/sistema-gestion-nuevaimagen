@@ -352,6 +352,52 @@ const COMITE_CARGOS=['COORDINADOR','RESPONSABLE DE ORGANIZACIÓN','RESPONSABLE E
 
 const BOOTSTRAP_VERSION = '2026-10-02-f';
 
+async function ensureInitialAdmin(){
+  const seedUser=String(process.env.INITIAL_ADMIN_USER||'').trim();
+  const seedPassword=String(process.env.INITIAL_ADMIN_PASSWORD||'');
+  const users=rowsFrom(await turso([{q:'SELECT COUNT(*) AS n FROM usuarios',params:[]}]));
+  const userCount=Number(users[0]?.n||0);
+
+  // Nunca crear credenciales públicas/conocidas por defecto. La instalación
+  // inicial exige credenciales de administrador definidas como secretos de entorno.
+  if(userCount===0){
+    if(!seedUser||!seedPassword){
+      throw new Error('Base de datos sin usuarios: configure INITIAL_ADMIN_USER e INITIAL_ADMIN_PASSWORD como variables de entorno para crear el administrador inicial de forma segura.');
+    }
+    if(seedUser.length>120||seedPassword.length<12||seedPassword.length>512){
+      throw new Error('Credenciales iniciales inválidas: el usuario debe tener hasta 120 caracteres y la contraseña entre 12 y 512 caracteres.');
+    }
+    await turso([{
+      q:'INSERT OR IGNORE INTO usuarios(usuario,clave_hash,nombre,rol,cargo) VALUES(?,?,?,?,?)',
+      params:[seedUser,modernHash(seedPassword),'Administrador del Sistema','A','Administrador']
+    }]);
+    return;
+  }
+
+  // Migración única y acotada para instalaciones nuevas que ya arrancaron con
+  // la semilla histórica de main. Solo toca la cuenta predeterminada si es el
+  // único usuario; nunca modifica cuentas personalizadas ni borra datos.
+  if(userCount!==1||!seedUser||!seedPassword) return;
+  if(seedUser.length>120||seedPassword.length<12||seedPassword.length>512){
+    throw new Error('Credenciales iniciales inválidas: el usuario debe tener hasta 120 caracteres y la contraseña entre 12 y 512 caracteres.');
+  }
+  await turso([{q:`CREATE TABLE IF NOT EXISTS erp_admin_seed_migration (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    completed_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,params:[]}]);
+  const migrated=rowsFrom(await turso([{q:'SELECT id FROM erp_admin_seed_migration WHERE id=1 LIMIT 1',params:[]}]));
+  if(migrated.length) return;
+  const onlyUser=rowsFrom(await turso([{q:'SELECT id,usuario,rol FROM usuarios LIMIT 2',params:[]}]));
+  if(onlyUser.length!==1||onlyUser[0].usuario!=='admin@comando.com'||!['A','J'].includes(String(onlyUser[0].rol))) return;
+  await turso([{
+    q:'UPDATE usuarios SET usuario=?,clave_hash=?,nombre=?,rol=?,cargo=? WHERE id=? AND usuario=?',
+    params:[seedUser,modernHash(seedPassword),'Administrador del Sistema','A','Administrador',onlyUser[0].id,'admin@comando.com']
+  }]);
+  const verified=rowsFrom(await turso([{q:'SELECT id FROM usuarios WHERE usuario=? AND activo=1 LIMIT 1',params:[seedUser]}]));
+  if(!verified.length) throw new Error('No se pudo verificar la migración de la cuenta administrativa inicial.');
+  await turso([{q:'INSERT OR IGNORE INTO erp_admin_seed_migration(id) VALUES(1)',params:[]}]);
+}
+
 async function execSchema() {
   // La tabla de metadatos debe existir antes de consultarla. En una base
   // existente sin erp_bootstrap_meta, la consulta anterior provocaba un
@@ -365,7 +411,7 @@ async function execSchema() {
   // El bootstrap debe ser idempotente y rápido en cada carga. Si la versión
   // ya fue aplicada, no volvemos a ejecutar todas las migraciones contra Turso.
   const meta=rowsFrom(await turso([{q:"SELECT version FROM erp_bootstrap_meta WHERE id=1 LIMIT 1",params:[]}]));
-  if(String(meta[0]?.version||'')===BOOTSTRAP_VERSION) return;
+  if(String(meta[0]?.version||'')===BOOTSTRAP_VERSION){ await ensureInitialAdmin(); return; }
 
   // Bases existentes ya funcionales no deben volver a ejecutar todo SCHEMA.
   // Eso implicaba decenas de round-trips a Turso y podía dejar el arranque
@@ -528,16 +574,7 @@ async function execSchema() {
     await turso([{q:'INSERT OR IGNORE INTO catalogo_problemas(categoria,nombre,orden) VALUES(?,?,?)',params:[categoria,nombre,i+1]}]);
   }
 
-  const users=rowsFrom(await turso([{q:'SELECT COUNT(*) AS n FROM usuarios',params:[]}]));
-  if(Number(users[0]?.n||0)===0){
-    // Único acceso inicial: un administrador semilla. Los demás usuarios
-    // administrativos/operativos deben ser creados desde Gestión de Usuarios.
-    // El administrador semilla puede eliminarse después de crear otro A activo.
-    await turso([{
-      q:'INSERT OR IGNORE INTO usuarios(usuario,clave_hash,nombre,rol,cargo) VALUES(?,?,?,?,?)',
-      params:['admin@comando.com',modernHash('admin123'),'Administrador del Sistema','A','Administrador']
-    }]);
-  }
+  await ensureInitialAdmin();
   await turso([{q:"INSERT OR REPLACE INTO erp_bootstrap_meta(id,version) VALUES(1,?)",params:[BOOTSTRAP_VERSION]}]);
 }
 
@@ -554,6 +591,15 @@ module.exports=async function handler(req,res){
       const session=verify(getCookie(req,'erp_session'));
       if(!session) return res.status(401).json({ok:false,error:'Sesión requerida'});
       if(!['J','A'].includes(session.rol)) return res.status(403).json({ok:false,error:'Se requiere autorización J/A'});
+      // Una firma válida no basta: el usuario podría haber sido desactivado
+      // o eliminado después de emitirse la cookie.
+      const active=rowsFrom(await turso([{
+        q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? LIMIT 1',
+        params:[session.uid]
+      }]))[0];
+      if(!active||Number(active.activo)!==1||active.usuario!==session.usuario||active.rol!==session.rol){
+        return res.status(401).json({ok:false,error:'La sesión administrativa ya no está autorizada'});
+      }
     }
     await execSchema();
     if(req.internalBootstrap===true)return {ok:true,ready:true};

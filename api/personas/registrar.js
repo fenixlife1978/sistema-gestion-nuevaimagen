@@ -10,6 +10,8 @@ module.exports=async function handler(req,res){
   try{
     const session=verify(getCookie(req,'erp_session'));
     if(!session) return res.status(401).json({error:'Sesión no válida o expirada'});
+    const activeUser=rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? LIMIT 1',params:[session.uid]}]))[0];
+    if(!activeUser||Number(activeUser.activo)!==1||activeUser.usuario!==session.usuario||activeUser.rol!==session.rol) return res.status(401).json({error:'La sesión ya no está autorizada'});
 
     const b=parseBody(req), reclutadorId=Number(b.reclutador_id), cedula=c(b.cedula);
     const telefono=tel(b.telefono), calle=s(b.numero_calle,80), casa=s(b.numero_casa,80), direccionPersona=s(b.direccion,500);

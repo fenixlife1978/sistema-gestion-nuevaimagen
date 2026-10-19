@@ -9,6 +9,8 @@ module.exports=async function(req,res){
   if(req.method!=='POST') return fail(res,405,'Method not allowed');
   try{
     const session=verify(getCookie(req,'erp_session')); if(!session) return fail(res,401,'Sesión no válida o expirada');
+    const activeUser=rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? LIMIT 1',params:[session.uid]}]))[0];
+    if(!activeUser||Number(activeUser.activo)!==1||activeUser.usuario!==session.usuario||activeUser.rol!==session.rol) return res.status(401).json({error:'La sesión ya no está autorizada'});
     if(!['J','A','O'].includes(session.rol)) return fail(res,403,'Rol de sesión no permitido');
     const b=parseBody(req), tipo=st(b.tipo,20).toLowerCase(), cedula=ci(b.cedula), cargo=st(b.cargo,120), centro=st(b.centro_codigo,80);
     const telefono=tel(b.telefono), numero_calle=st(b.numero_calle,80), numero_casa=st(b.numero_casa,80), direccion=st(b.direccion,500), nombre=st(b.nombre,250), padron=b.padron&&typeof b.padron==='object'?b.padron:null;

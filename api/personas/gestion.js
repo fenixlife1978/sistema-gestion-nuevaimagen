@@ -22,7 +22,7 @@ async function actor(req){
   if(!session) return null;
   const rows=rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? AND activo=1 LIMIT 1',params:[session.uid]}]));
   const a=rows[0];
-  if(!a || a.usuario!==session.usuario || !rolesPermitidos.includes(a.rol)) return null;
+  if(!a || a.usuario!==session.usuario || a.rol!==session.rol || !rolesPermitidos.includes(a.rol)) return null;
   return a;
 }
 async function log(a,texto){

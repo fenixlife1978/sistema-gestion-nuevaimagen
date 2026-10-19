@@ -5,7 +5,7 @@ const s=v=>v==null?'':String(v).trim();
 const ci=v=>s(v).replace(/\D/g,'');
 const normTel=v=>{const x=ci(v);return x?x.slice(0,4)+'-'+x.slice(4):''};
 const edad=f=>{if(!f)return 0;const d=new Date(s(f)+'T00:00:00');if(Number.isNaN(d.getTime()))return 0;const n=new Date();let e=n.getFullYear()-d.getFullYear();const m=n.getMonth()-d.getMonth();if(m<0||(m===0&&n.getDate()<d.getDate()))e--;return e>=0&&e<=130?e:0};
-async function actor(req){const se=verify(getCookie(req,'erp_session'));if(!se)return null;const a=rowsFrom(await turso([{q:'SELECT id,usuario,rol FROM usuarios WHERE id=? AND activo=1 LIMIT 1',params:[se.uid]}]))[0];return a&&a.usuario===se.usuario&&['J','A','O'].includes(a.rol)?a:null}
+async function actor(req){const se=verify(getCookie(req,'erp_session'));if(!se)return null;const a=rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? LIMIT 1',params:[se.uid]}]))[0];return a&&Number(a.activo)===1&&a.usuario===se.usuario&&a.rol===se.rol&&['J','A','O'].includes(a.rol)?a:null}
 async function conflict(ced){const q=await turso([
  {q:'SELECT 1 FROM reclutadores WHERE cedula=? LIMIT 1',params:[ced]},
  {q:'SELECT 1 FROM asignaciones WHERE cedula=? LIMIT 1',params:[ced]},

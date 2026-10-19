@@ -5,13 +5,14 @@ module.exports=async function(req,res){
   const session=verify(getCookie(req,'erp_session'));
   if(!session) return res.status(401).json({error:'Sesión requerida'});
   const actor=rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? AND activo=1 LIMIT 1',params:[session.uid]}]))[0];
-  if(!actor || actor.usuario!==session.usuario || !['J','A'].includes(actor.rol)) return res.status(403).json({error:'Se requiere Jefe o Administrador activo'});
+  if(!actor || actor.usuario!==session.usuario || actor.rol!==session.rol || !['J','A'].includes(actor.rol)) return res.status(403).json({error:'Se requiere Jefe o Administrador activo'});
   const b=parseBody(req), action=String(b.action||'');
   try{
     if(action==='save'){
       const id=Number(b.id||0), usuario=String(b.usuario||'').trim(), nombre=String(b.nombre||'').trim();
       const rol=String(b.rol||'').trim(), cargo=String(b.cargo||'').trim(), telefono=b.telefono?String(b.telefono):null, clave=String(b.clave||'');
-      if(!usuario||!nombre||!['J','A','O','C'].includes(rol)) return res.status(400).json({error:'Datos de usuario inválidos'});
+      if(!usuario||usuario.length>120||!nombre||nombre.length>200||!['J','A','O','C'].includes(rol)) return res.status(400).json({error:'Datos de usuario inválidos'});
+      if(clave && (clave.length<12 || clave.length>512)) return res.status(400).json({error:'La clave nueva debe tener entre 12 y 512 caracteres'});
       if(id){
         const target=rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? LIMIT 1',params:[id]}]))[0];
         if(!target) return res.status(404).json({error:'Usuario no encontrado'});

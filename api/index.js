@@ -47,8 +47,8 @@ async function health(res) {
   res.setHeader("X-Content-Type-Options", "nosniff");
 
   const started = Date.now();
-  const url = String(process.env.TURSO_URL || "").trim();
-  const token = String(process.env.TURSO_TOKEN || "").trim();
+  const url = String(process.env.TURSO_URL || process.env.TURSO_DATABASE_URL || "").trim();
+  const token = String(process.env.TURSO_TOKEN || process.env.TURSO_AUTH_TOKEN || "").trim();
 
   if (!url || !token) {
     return res.status(503).json({
@@ -59,19 +59,23 @@ async function health(res) {
     });
   }
 
-  const dbUrl = url.startsWith("libsql://")
+  const baseUrl = (url.startsWith("libsql://")
     ? url.replace("libsql://", "https://")
-    : (/^https?:\/\//.test(url) ? url : "https://" + url);
+    : (/^https?:\/\//.test(url) ? url : "https://" + url)).replace(/\/$/, "");
+  const pipelineUrl = /\/v2\/pipeline$/i.test(baseUrl) ? baseUrl : baseUrl + "/v2/pipeline";
 
   try {
-    const response = await fetch(dbUrl, {
+    const response = await fetch(pipelineUrl, {
       method: "POST",
       headers: {
         Authorization: "Bearer " + token,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        statements: [{ q: "SELECT 1 AS ok", params: [] }],
+        requests: [
+          { type: "execute", stmt: { sql: "SELECT 1 AS ok", args: [] } },
+          { type: "close" },
+        ],
       }),
     });
 
@@ -80,10 +84,10 @@ async function health(res) {
     }
 
     const data = await response.json();
-    const statement = Array.isArray(data) ? data[0] : (data.statements || [])[0];
-    const result = statement && (statement.results || statement);
-    const row = result && result.rows && result.rows[0];
-    const ok = row && Number(row[0]) === 1;
+    const result = (data.results || []).find(x => x?.type === "ok" && x?.response?.type === "execute")?.response?.result;
+    const row = result?.rows?.[0];
+    const value = row?.[0];
+    const ok = value && typeof value === "object" ? Number(value.value) === 1 : Number(value) === 1;
 
     if (!ok) throw new Error("Database health check failed");
 
