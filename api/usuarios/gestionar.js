@@ -8,6 +8,10 @@ module.exports=async function(req,res){
   if(!actor || actor.usuario!==session.usuario || actor.rol!==session.rol || !['J','A'].includes(actor.rol)) return res.status(403).json({error:'Se requiere Jefe o Administrador activo'});
   const b=parseBody(req), action=String(b.action||'');
   try{
+    // Las bases antiguas migradas pueden tener rol_legacy; las nuevas no.
+    // Detectamos el esquema real para no fallar con "no such column: rol_legacy".
+    const userColumns=rowsFrom(await turso([{q:'PRAGMA table_info(usuarios)',params:[]}]));
+    const hasLegacyRole=userColumns.some(col=>col.name==='rol_legacy');
     if(action==='save'){
       const id=Number(b.id||0), usuario=String(b.usuario||'').trim(), nombre=String(b.nombre||'').trim();
       const rol=String(b.rol||'').trim(), cargo=String(b.cargo||'').trim(), telefono=b.telefono?String(b.telefono):null, clave=String(b.clave||'');
@@ -20,13 +24,25 @@ module.exports=async function(req,res){
         if(target.rol==='J' && rol!=='J' && target.activo){const nJ=Number(rowsFrom(await turso([{q:'SELECT COUNT(*) n FROM usuarios WHERE activo=1 AND rol=\'J\'',params:[]}]))[0]?.n||0);if(nJ<=1)return res.status(409).json({error:'No puede retirar el último Jefe activo'});}
         if(target.rol==='A' && rol!=='A' && target.activo){const nA=Number(rowsFrom(await turso([{q:'SELECT COUNT(*) n FROM usuarios WHERE activo=1 AND rol=\'A\'',params:[]}]))[0]?.n||0);if(nA<=1)return res.status(409).json({error:'No puede retirar el último Administrador activo'});}
         if(clave){
-          await turso([{q:'UPDATE usuarios SET nombre=?,rol=?,rol_legacy=?,cargo=?,telefono=?,clave_hash=? WHERE id=?',params:[nombre,rol,rol==='C'?'O':rol,cargo,telefono,modernHash(clave),id]}]);
+          if(hasLegacyRole){
+            await turso([{q:'UPDATE usuarios SET nombre=?,rol=?,rol_legacy=?,cargo=?,telefono=?,clave_hash=? WHERE id=?',params:[nombre,rol,rol==='C'?'O':rol,cargo,telefono,modernHash(clave),id]}]);
+          }else{
+            await turso([{q:'UPDATE usuarios SET nombre=?,rol=?,cargo=?,telefono=?,clave_hash=? WHERE id=?',params:[nombre,rol,cargo,telefono,modernHash(clave),id]}]);
+          }
         }else{
-          await turso([{q:'UPDATE usuarios SET nombre=?,rol=?,rol_legacy=?,cargo=?,telefono=? WHERE id=?',params:[nombre,rol,rol==='C'?'O':rol,cargo,telefono,id]}]);
+          if(hasLegacyRole){
+            await turso([{q:'UPDATE usuarios SET nombre=?,rol=?,rol_legacy=?,cargo=?,telefono=? WHERE id=?',params:[nombre,rol,rol==='C'?'O':rol,cargo,telefono,id]}]);
+          }else{
+            await turso([{q:'UPDATE usuarios SET nombre=?,rol=?,cargo=?,telefono=? WHERE id=?',params:[nombre,rol,cargo,telefono,id]}]);
+          }
         }
       }else{
         if(!clave) return res.status(400).json({error:'La clave es obligatoria al crear'});
-        await turso([{q:'INSERT INTO usuarios(usuario,clave_hash,nombre,rol,rol_legacy,cargo,telefono) VALUES(?,?,?,?,?,?,?)',params:[usuario,modernHash(clave),nombre,rol,rol==='C'?'O':rol,cargo,telefono]}]);
+        if(hasLegacyRole){
+          await turso([{q:'INSERT INTO usuarios(usuario,clave_hash,nombre,rol,rol_legacy,cargo,telefono) VALUES(?,?,?,?,?,?,?)',params:[usuario,modernHash(clave),nombre,rol,rol==='C'?'O':rol,cargo,telefono]}]);
+        }else{
+          await turso([{q:'INSERT INTO usuarios(usuario,clave_hash,nombre,rol,cargo,telefono) VALUES(?,?,?,?,?,?)',params:[usuario,modernHash(clave),nombre,rol,cargo,telefono]}]);
+        }
       }
       return res.json({ok:true});
     }
