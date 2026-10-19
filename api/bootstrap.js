@@ -530,12 +530,19 @@ async function execSchema() {
 
   const users=rowsFrom(await turso([{q:'SELECT COUNT(*) AS n FROM usuarios',params:[]}]));
   if(Number(users[0]?.n||0)===0){
-    // Único acceso inicial: un administrador semilla. Los demás usuarios
-    // administrativos/operativos deben ser creados desde Gestión de Usuarios.
-    // El administrador semilla puede eliminarse después de crear otro A activo.
+    // Nunca crear credenciales públicas/conocidas por defecto. La instalación
+    // inicial exige credenciales de administrador definidas como secretos de entorno.
+    const seedUser=String(process.env.INITIAL_ADMIN_USER||'').trim();
+    const seedPassword=String(process.env.INITIAL_ADMIN_PASSWORD||'');
+    if(!seedUser||!seedPassword){
+      throw new Error('Base de datos sin usuarios: configure INITIAL_ADMIN_USER e INITIAL_ADMIN_PASSWORD como variables de entorno para crear el administrador inicial de forma segura.');
+    }
+    if(seedUser.length>120||seedPassword.length<12||seedPassword.length>512){
+      throw new Error('Credenciales iniciales inválidas: el usuario debe tener hasta 120 caracteres y la contraseña entre 12 y 512 caracteres.');
+    }
     await turso([{
       q:'INSERT OR IGNORE INTO usuarios(usuario,clave_hash,nombre,rol,cargo) VALUES(?,?,?,?,?)',
-      params:['admin@comando.com',modernHash('admin123'),'Administrador del Sistema','A','Administrador']
+      params:[seedUser,modernHash(seedPassword),'Administrador del Sistema','A','Administrador']
     }]);
   }
   await turso([{q:"INSERT OR REPLACE INTO erp_bootstrap_meta(id,version) VALUES(1,?)",params:[BOOTSTRAP_VERSION]}]);
