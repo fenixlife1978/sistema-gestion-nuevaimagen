@@ -1,0 +1,288 @@
+const {parseBody,turso,rowsFrom,verify,getCookie}=require('../../lib/auth');
+
+const rolesPermitidos=['J','A','O'];
+const CED=/^\d{5,9}$/;
+const TEL=/^0\d{10}$/;
+
+function s(v){ return v===undefined||v===null?'':String(v).trim(); }
+function n(v){ const x=Number(v); return Number.isInteger(x)?x:0; }
+function edad(fecha){
+  if(!fecha) return 0;
+  const d=new Date(String(fecha)+'T00:00:00');
+  if(Number.isNaN(d.getTime())) return 0;
+  const now=new Date(); let e=now.getFullYear()-d.getFullYear();
+  const m=now.getMonth()-d.getMonth();
+  if(m<0 || (m===0 && now.getDate()<d.getDate())) e--;
+  return e>=0&&e<=130?e:0;
+}
+function normTel(v){ const x=s(v).replace(/\D/g,''); return x ? x.slice(0,4)+'-'+x.slice(4) : ''; }
+
+async function actor(req){
+  const session=verify(getCookie(req,'erp_session'));
+  if(!session) return null;
+  const rows=rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? AND activo=1 LIMIT 1',params:[session.uid]}]));
+  const a=rows[0];
+  if(!a || a.usuario!==session.usuario || !rolesPermitidos.includes(a.rol)) return null;
+  return a;
+}
+async function log(a,texto){
+  try{ await turso([{q:'INSERT INTO actividad(tipo,texto,usuario_id) VALUES(?,?,?)',params:['user',texto,a.id]}]); }catch(e){ console.error('actividad:',e); }
+}
+async function exec(statements){ return turso(statements); }
+
+module.exports=async function(req,res){
+  if(req.method!=='POST') return res.status(405).json({error:'Method not allowed'});
+  const a=await actor(req);
+  if(!a) return res.status(401).json({error:'Sesión no válida o permisos insuficientes'});
+  const b=parseBody(req), action=s(b.action);
+  try{
+    if(action==='crear_reclutador'){
+      const ced=s(b.cedula), tel=s(b.telefono), estructura=s(b.estructura), numero_calle=s(b.numero_calle), numero_casa=s(b.numero_casa), direccion=s(b.direccion), centro_codigo=s(b.centro_codigo);
+      if(!CED.test(ced)) return res.status(400).json({error:'Cédula inválida'});
+      if(tel && !TEL.test(tel.replace(/\D/g,''))) return res.status(400).json({error:'Teléfono inválido'});
+      if(!centro_codigo) return res.status(400).json({error:'Centro electoral obligatorio. Seleccione primero el centro para registrar el movilizador'});
+      const centro=rowsFrom(await exec([{q:'SELECT codigo,nombre FROM centros WHERE codigo=? LIMIT 1',params:[centro_codigo]}]))[0];
+      if(!centro) return res.status(404).json({error:'Centro electoral no encontrado'});
+      const p=rowsFrom(await exec([{q:'SELECT * FROM padron WHERE CAST(cedula AS INTEGER)=CAST(? AS INTEGER) LIMIT 1',params:[ced]}]))[0];
+      if(!p) return res.status(404).json({error:'La persona no existe en el padrón CNE'});
+      if(!p.centro_votacion || String(p.centro_votacion)!==String(centro_codigo)) return res.status(409).json({error:'Registro rechazado: el centro electoral de la persona en el padrón CNE no coincide con el centro seleccionado'});
+      const dup=rowsFrom(await exec([{q:'SELECT id,cedula FROM reclutadores WHERE CAST(cedula AS INTEGER)=CAST(? AS INTEGER) LIMIT 1',params:[ced]}]))[0];
+      if(dup){
+        const existente=rowsFrom(await exec([{
+          q:'SELECT r.*, p.letra, p.p_apellido, p.s_apellido, p.p_nombre, p.s_nombre, p.centro_votacion, p.nombre_cv FROM reclutadores r LEFT JOIN padron p ON p.cedula=r.cedula WHERE r.id=? LIMIT 1',
+          params:[dup.id]
+        }]))[0];
+        if(existente){
+          existente.lista=[];
+          const todos=rowsFrom(await exec([{
+            q:'SELECT r.id,r.cedula,r.telefono,r.estructura,r.numero_calle,r.numero_casa,r.direccion,r.creado,p.letra,p.p_apellido,p.s_apellido,p.p_nombre,p.s_nombre,p.centro_votacion,p.nombre_cv FROM reclutadores r LEFT JOIN padron p ON p.cedula=r.cedula ORDER BY r.creado DESC,r.id DESC',
+            params:[]
+          }]));
+          todos.forEach(x=>{x.lista=[]});
+          return res.json({ok:true,ya_existia:true,id:existente.id||dup.id,movilizador:existente,movilizadores:todos});
+        }
+        return res.status(409).json({error:'La persona ya está registrada como movilizador, pero no pudo ser recuperada desde Turso'});
+      }
+
+      // Una persona puede ejercer varios cargos simultáneamente. Solo bloqueamos
+      // el nuevo cargo si existe otro cargo y no hay una autorización vigente para
+      // el destino MOVILIZADOR.
+      // Detectamos los cargos existentes con consultas independientes. Evitamos
+      // UNION + LIMIT por subconsulta porque SQLite/Turso puede rechazar esa forma
+      // de SQL y dejar el alta bloqueada justo cuando la persona tiene otro cargo.
+      const crossSets=await exec([
+        {q:'SELECT cedula FROM asignaciones WHERE cedula=? LIMIT 1',params:[ced]},
+        {q:'SELECT cargo FROM direccion_ejecutiva WHERE cedula=? LIMIT 1',params:[ced]},
+        {q:'SELECT comunidad,cargo FROM comite_vecinal WHERE cedula=? LIMIT 1',params:[ced]},
+        {q:'SELECT centro_codigo,cargo FROM centro_cargos WHERE cedula=? LIMIT 1',params:[ced]}
+      ]);
+      const cross=[];
+      if(rowsFrom([crossSets[0]]).length) cross.push('COMPROMETIDO');
+      if(rowsFrom([crossSets[1]]).length) cross.push('DIRECCIÓN EJECUTIVA');
+      if(rowsFrom([crossSets[2]]).length) cross.push('COMITÉ VECINAL');
+      if(rowsFrom([crossSets[3]]).length) cross.push('CARGO DE CENTRO');
+
+      // Comité Vecinal es incompatible con Movilizador y NO admite excepción.
+      if(cross.includes('COMITÉ VECINAL')){
+        return res.status(409).json({
+          error:'Registro rechazado: la persona ya está registrada en Comité Vecinal. Una persona con cargo de Comité Vecinal no puede ser registrada como Movilizador, ni siquiera mediante autorización.',
+          bloqueado:true,
+          motivo_bloqueo:'COMITÉ VECINAL',
+          cargos_existentes:cross
+        });
+      }
+
+      let autorizacionId=null;
+      if(cross.length){
+        const auth=rowsFrom(await exec([{
+          q:'SELECT id FROM autorizaciones_duplicidad_persona WHERE cedula=? AND contexto_destino=? AND consumida_en IS NULL ORDER BY id DESC LIMIT 1',
+          params:[ced,'MOVILIZADOR']
+        }]))[0];
+        if(!auth){
+          return res.status(409).json({
+            error:'La persona ya está registrada en otro cargo: '+cross.join(', ')+'. Para registrarla también como movilizador se requiere autorización de un Jefe de Comando o Administrador.',
+            requiere_autorizacion:true,
+            cargos_existentes:cross
+          });
+        }
+        autorizacionId=Number(auth.id);
+      }
+
+      const now=new Date().toISOString();
+      const telefono=tel?normTel(tel):null;
+
+      // Persistencia definitiva: INSERT + SELECT en el MISMO pipeline HTTP
+      // de Turso. El alta solo se considera completada cuando la respuesta del
+      // mismo pipeline contiene la fila recién creada. No usamos RETURNING porque
+      // este transporte HTTP ya demostró que no expone correctamente ese resultado.
+      const alta=await exec([
+        {
+          q:'INSERT INTO reclutadores(cedula,telefono,estructura,numero_calle,numero_casa,direccion) VALUES(?,?,?,?,?,?)',
+          params:[ced,telefono,estructura||null,numero_calle||null,numero_casa||null,direccion||null]
+        },
+        {
+          q:'SELECT id,cedula,telefono,estructura,numero_calle,numero_casa,direccion,creado FROM reclutadores WHERE CAST(cedula AS INTEGER)=CAST(? AS INTEGER) ORDER BY id DESC LIMIT 1',
+          params:[ced]
+        }
+      ]);
+      const creadoSeguro=rowsFrom(alta).find(x=>x && String(Number(x.cedula))===String(Number(ced)))||null;
+
+      if(!creadoSeguro || !creadoSeguro.id){
+        console.error('Turso no devolvió la fila del movilizador en el mismo pipeline:',ced,alta);
+        return res.status(503).json({
+          error:'Turso no confirmó el movilizador después del alta.',
+          persistencia_confirmada:false
+        });
+      }
+
+      if(autorizacionId){
+        await exec([{
+          q:'UPDATE autorizaciones_duplicidad_persona SET consumida_en=?, consumida_por=? WHERE id=? AND consumida_en IS NULL',
+          params:[now,a.id,autorizacionId]
+        }]);
+      }
+
+      const creado=creadoSeguro;
+      await log(a,'Nuevo movilizador creado: '+ced+(autorizacionId?' • autorización #'+autorizacionId+' consumida':''));
+      // Esta fila fue devuelta por el SELECT confirmatorio del mismo
+      // pipeline que ejecutó el INSERT.
+      const registroCreado={...creadoSeguro};
+      registroCreado.letra=p.letra||null;
+      registroCreado.p_apellido=p.p_apellido||null;
+      registroCreado.s_apellido=p.s_apellido||null;
+      registroCreado.p_nombre=p.p_nombre||null;
+      registroCreado.s_nombre=p.s_nombre||null;
+      registroCreado.centro_votacion=p.centro_votacion||null;
+      registroCreado.nombre_cv=p.nombre_cv||centro.nombre||null;
+      registroCreado.lista=[];
+      let todos=[];
+      try{
+        todos=rowsFrom(await exec([{q:'SELECT r.id,r.cedula,r.telefono,r.estructura,r.numero_calle,r.numero_casa,r.direccion,r.creado,p.letra,p.p_apellido,p.s_apellido,p.p_nombre,p.s_nombre,p.centro_votacion,p.nombre_cv FROM reclutadores r LEFT JOIN padron p ON p.cedula=r.cedula ORDER BY r.creado DESC,r.id DESC',params:[]}]));
+      }catch(e){
+        console.error('listar movilizadores despues de alta:',e);
+      }
+      todos.forEach(x=>{x.lista=[]});
+      // La confirmación ya provino de Turso. Si la lectura global tuviera un
+      // retraso excepcional, conservamos la fila confirmada en esta respuesta,
+      // pero nunca la usamos como sustituto de la confirmación de persistencia.
+      const yaEnLista=todos.some(x=>String(Number(x.cedula))===String(Number(ced)));
+      if(!yaEnLista) todos.unshift({...registroCreado});
+      return res.json({ok:true,id:registroCreado.id||null,movilizador:registroCreado,movilizadores:todos});
+    }
+
+    if(action==='crear_reclutador_manual'){
+      return res.status(409).json({error:'El registro manual de movilizadores está deshabilitado: todo movilizador debe pertenecer al Padrón CNE del centro seleccionado'});
+      const ced=s(b.cedula), letra=s(b.letra)||'V', pa=s(b.p_apellido), sa=s(b.s_apellido), pn=s(b.p_nombre), sn=s(b.s_nombre);
+      const sexo=s(b.sexo), fecha=s(b.fecha_nac), tel=s(b.telefono), estructura=s(b.estructura), numero_calle=s(b.numero_calle), numero_casa=s(b.numero_casa), direccion=s(b.direccion);
+      const cv= b.centro || {};
+      if(!CED.test(ced)||!pa||!pn) return res.status(400).json({error:'Datos personales incompletos'});
+      if(!['V','E'].includes(letra)||!['M','F'].includes(sexo)) return res.status(400).json({error:'Datos de identidad inválidos'});
+      if(tel && !TEL.test(tel.replace(/\D/g,''))) return res.status(400).json({error:'Teléfono inválido'});
+      const exists=rowsFrom(await exec([{q:'SELECT cedula FROM padron WHERE cedula=? LIMIT 1',params:[ced]}]))[0];
+      if(exists) return res.status(409).json({error:'La cédula ya existe en el padrón'});
+      if(!s(cv.codigo)) return res.status(400).json({error:'Centro electoral requerido'});
+      const centro=rowsFrom(await exec([{q:'SELECT * FROM centros WHERE codigo=? LIMIT 1',params:[s(cv.codigo)]}]))[0];
+      if(!centro) return res.status(400).json({error:'Centro electoral no existe'});
+      const sql=[
+        {q:'INSERT INTO padron(cedula,letra,p_apellido,s_apellido,p_nombre,s_nombre,sexo,fecha_nac,edad,codigo_estado,estado,codigo_municipio,municipio,codigo_parroquia,parroquia,centro_votacion,nombre_cv,es_manual) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)',
+         params:[ced,letra,pa,sa,pn,sn,sexo,fecha,edad(fecha),centro.cod_estado,centro.estado,centro.cod_municipio,centro.municipio,centro.cod_parroquia,centro.parroquia,centro.codigo,centro.nombre]},
+        {q:'INSERT INTO reclutadores(cedula,telefono,estructura,numero_calle,numero_casa,direccion) VALUES(?,?,?,?,?,?)',params:[ced,tel?normTel(tel):null,estructura||null,numero_calle||null,numero_casa||null,direccion||null]}
+      ];
+      const out=await exec(sql);
+      await log(a,'Movilizador creado manual: '+letra+'-'+ced);
+      const rr=rowsFrom(out).pop()||{};
+      return res.json({ok:true,id:rr.id||null});
+    }
+
+    if(action==='crear_comprometido_manual'){
+      const ced=s(b.cedula), letra=s(b.letra)||'V', pa=s(b.p_apellido), sa=s(b.s_apellido), pn=s(b.p_nombre), sn=s(b.s_nombre);
+      const sexo=s(b.sexo), fecha=s(b.fecha_nac), tel=s(b.telefono), calle=s(b.numero_calle), casa=s(b.numero_casa), dir=s(b.direccion);
+      const rid=n(b.reclutador_id), cv=b.centro||{};
+      if(!CED.test(ced)||!pa||!pn||!rid) return res.status(400).json({error:'Datos del comprometido incompletos'});
+      if(!['V','E'].includes(letra)||!['M','F'].includes(sexo)) return res.status(400).json({error:'Datos de identidad inválidos'});
+      if(tel && !TEL.test(tel.replace(/\D/g,''))) return res.status(400).json({error:'Teléfono inválido'});
+      const r=rowsFrom(await exec([{q:'SELECT r.id,r.cedula,p.centro_votacion FROM reclutadores r LEFT JOIN padron p ON p.cedula=r.cedula WHERE r.id=? LIMIT 1',params:[rid]}]))[0];
+      if(!r) return res.status(404).json({error:'Movilizador no existe'});
+      if(!r.centro_votacion) return res.status(409).json({error:'No se puede registrar el comprometido porque el movilizador no tiene un centro electoral asociado'});
+      const cnt=Number(rowsFrom(await exec([{q:'SELECT COUNT(*) n FROM asignaciones WHERE reclutador_id=?',params:[rid]}]))[0]?.n||0);
+      if(cnt>=10) return res.status(409).json({error:'El movilizador ya tiene 10 compromisos'});
+      const exists=rowsFrom(await exec([{q:'SELECT cedula FROM padron WHERE cedula=? LIMIT 1',params:[ced]}]))[0];
+      if(exists) return res.status(409).json({error:'La cédula ya existe en el padrón'});
+      const any=rowsFrom(await exec([{q:'SELECT reclutador_id FROM asignaciones WHERE cedula=? LIMIT 1',params:[ced]}]))[0];
+      if(any) return res.status(409).json({error:'La persona ya está asignada a otro movilizador'});
+      if(!s(cv.codigo)) return res.status(400).json({error:'Centro electoral requerido'});
+      const centro=rowsFrom(await exec([{q:'SELECT * FROM centros WHERE codigo=? LIMIT 1',params:[s(cv.codigo)]}]))[0];
+      if(!centro) return res.status(400).json({error:'Centro electoral no existe'});
+      if(String(centro.codigo)!==String(r.centro_votacion)) return res.status(409).json({error:'El comprometido no puede ser registrado: su centro electoral no coincide con el centro electoral del movilizador'});
+      const max=Number(rowsFrom(await exec([{q:'SELECT COALESCE(MAX(posicion),0) m FROM asignaciones WHERE reclutador_id=?',params:[rid]}]))[0]?.m||0);
+      const pos=max+1;
+      await exec([
+        {q:'INSERT INTO padron(cedula,letra,p_apellido,s_apellido,p_nombre,s_nombre,sexo,fecha_nac,edad,codigo_estado,estado,codigo_municipio,municipio,codigo_parroquia,parroquia,centro_votacion,nombre_cv,es_manual) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)',params:[ced,letra,pa,sa,pn,sn,sexo,fecha,edad(fecha),centro.cod_estado,centro.estado,centro.cod_municipio,centro.municipio,centro.cod_parroquia,centro.parroquia,centro.codigo,centro.nombre]},
+        {q:'INSERT INTO asignaciones(reclutador_id,cedula,posicion,telefono,numero_calle,numero_casa,direccion) VALUES(?,?,?,?,?,?,?)',params:[rid,ced,pos,tel?normTel(tel):null,calle||null,casa||null,dir||null]}
+      ]);
+      await log(a,'Alta manual CNE y asignación: '+letra+'-'+ced+' en lista #'+rid);
+      return res.json({ok:true,posicion:pos});
+    }
+
+    if(action==='agregar_asignacion'){
+      const rid=n(b.reclutador_id), ced=s(b.cedula), tel=s(b.telefono), calle=s(b.numero_calle), casa=s(b.numero_casa), dir=s(b.direccion);
+      if(!rid||!CED.test(ced)) return res.status(400).json({error:'Datos de asignación inválidos'});
+      if(tel && !TEL.test(tel.replace(/\D/g,''))) return res.status(400).json({error:'Teléfono inválido'});
+      const r=rowsFrom(await exec([{q:'SELECT r.id,r.cedula,p.centro_votacion FROM reclutadores r LEFT JOIN padron p ON p.cedula=r.cedula WHERE r.id=? LIMIT 1',params:[rid]}]))[0];
+      if(!r) return res.status(404).json({error:'Movilizador no existe'});
+      if(r.cedula===ced) return res.status(409).json({error:'La cédula corresponde al propio movilizador'});
+      if(!r.centro_votacion) return res.status(409).json({error:'No se puede registrar el comprometido porque el movilizador no tiene un centro electoral asociado'});
+      const p=rowsFrom(await exec([{q:'SELECT cedula,centro_votacion FROM padron WHERE cedula=? LIMIT 1',params:[ced]}]))[0];
+      if(!p) return res.status(404).json({error:'La persona no existe en el padrón'});
+      if(!p.centro_votacion || String(p.centro_votacion)!==String(r.centro_votacion)) return res.status(409).json({error:'El comprometido no puede ser registrado: su centro electoral no coincide con el centro electoral del movilizador'});
+      const cnt=Number(rowsFrom(await exec([{q:'SELECT COUNT(*) n FROM asignaciones WHERE reclutador_id=?',params:[rid]}]))[0]?.n||0);
+      if(cnt>=10) return res.status(409).json({error:'El movilizador ya tiene 10 compromisos'});
+      const own=rowsFrom(await exec([{q:'SELECT id FROM asignaciones WHERE reclutador_id=? AND cedula=? LIMIT 1',params:[rid,ced]}]))[0];
+      if(own) return res.status(409).json({error:'La persona ya está en esta lista'});
+      const any=rowsFrom(await exec([{q:'SELECT reclutador_id FROM asignaciones WHERE cedula=? LIMIT 1',params:[ced]}]))[0];
+      if(any) return res.status(409).json({error:'La persona ya está asignada a otro movilizador'});
+      const max=Number(rowsFrom(await exec([{q:'SELECT COALESCE(MAX(posicion),0) m FROM asignaciones WHERE reclutador_id=?',params:[rid]}]))[0]?.m||0);
+      const pos=max+1;
+      await exec([{q:'INSERT INTO asignaciones(reclutador_id,cedula,posicion,telefono,numero_calle,numero_casa,direccion) VALUES(?,?,?,?,?,?,?)',params:[rid,ced,pos,tel?normTel(tel):null,calle||null,casa||null,dir||null]}]);
+      await log(a,'C.I. '+ced+' agregada a lista #'+rid+' posición #'+pos);
+      return res.json({ok:true,posicion:pos});
+    }
+
+    if(action==='actualizar_asignacion'){
+      const rid=n(b.reclutador_id), ced=s(b.cedula), tel=s(b.telefono), calle=s(b.numero_calle), casa=s(b.numero_casa), dir=s(b.direccion);
+      if(!rid||!CED.test(ced)) return res.status(400).json({error:'Datos inválidos'});
+      if(tel && !TEL.test(tel.replace(/\D/g,''))) return res.status(400).json({error:'Teléfono inválido'});
+      const hit=rowsFrom(await exec([{q:'SELECT id FROM asignaciones WHERE reclutador_id=? AND cedula=? LIMIT 1',params:[rid,ced]}]))[0];
+      if(!hit) return res.status(404).json({error:'Asignación no encontrada'});
+      await exec([{q:'UPDATE asignaciones SET telefono=?,numero_calle=?,numero_casa=?,direccion=? WHERE id=?',params:[tel?normTel(tel):null,calle||null,casa||null,dir||null,hit.id]}]);
+      await log(a,'Datos de contacto actualizados en asignación #'+hit.id);
+      return res.json({ok:true});
+    }
+
+    if(action==='eliminar_asignacion'){
+      const rid=n(b.reclutador_id), ced=s(b.cedula);
+      if(!rid||!CED.test(ced)) return res.status(400).json({error:'Datos inválidos'});
+      const hit=rowsFrom(await exec([{q:'SELECT id FROM asignaciones WHERE reclutador_id=? AND cedula=? LIMIT 1',params:[rid,ced]}]))[0];
+      if(!hit) return res.status(404).json({error:'Asignación no encontrada'});
+      await exec([{q:'DELETE FROM asignaciones WHERE id=?',params:[hit.id]}]);
+      await log(a,'C.I. '+ced+' retirada de lista #'+rid);
+      return res.json({ok:true});
+    }
+
+    if(action==='eliminar_reclutador'){
+      const id=n(b.id);
+      if(!id) return res.status(400).json({error:'Movilizador inválido'});
+      const hit=rowsFrom(await exec([{q:'SELECT id,cedula FROM reclutadores WHERE id=? LIMIT 1',params:[id]}]))[0];
+      if(!hit) return res.status(404).json({error:'Movilizador no encontrado'});
+      await exec([{q:'DELETE FROM reclutadores WHERE id=?',params:[id]}]);
+      await log(a,'Movilizador #'+id+' eliminado');
+      return res.json({ok:true});
+    }
+    return res.status(400).json({error:'Acción no permitida'});
+  }catch(e){
+    console.error('personas-gestion:',e);
+    const msg=String(e.message||'Error de base de datos');
+    if(/unique|constraint/i.test(msg)) return res.status(409).json({error:'La operación entra en conflicto con un registro existente'});
+    return res.status(500).json({error:msg});
+  }
+};
