@@ -61,7 +61,7 @@ module.exports = async function handler(req, res) {
     // exponerse como SQL arbitrario desde el navegador.
     const readonly = stmts.every(({ q }) => {
       const normalized = q.trim().replace(/^\uFEFF/, '');
-      return /^(SELECT|PRAGMA)\b/i.test(normalized);
+      return /^SELECT\b/i.test(normalized);
     });
     if (!readonly) {
       return res.status(403).json({ error: 'El proxy Turso solo permite consultas SELECT' });
