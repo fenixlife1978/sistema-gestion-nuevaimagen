@@ -4,6 +4,8 @@ module.exports=async function(req,res){
   if(req.method!=='POST') return res.status(405).json({error:'Method not allowed'});
   const s=verify(getCookie(req,'erp_session'));
   if(!s) return res.status(401).json({error:'Sesión requerida'});
+  const activeUser=rowsFrom(await turso([{q:'SELECT id,usuario,rol,activo FROM usuarios WHERE id=? LIMIT 1',params:[s.uid]}]))[0];
+  if(!activeUser||Number(activeUser.activo)!==1||activeUser.usuario!==s.usuario||activeUser.rol!==s.rol) return res.status(401).json({error:'La sesión ya no está autorizada'});
   if(!['J','A','O'].includes(s.rol)) return res.status(403).json({error:'Rol no permitido'});
   const b=parseBody(req), action=String(b.action||''), codigo=String(b.codigo||'').trim();
   try{
