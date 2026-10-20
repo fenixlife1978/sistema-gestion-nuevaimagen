@@ -1,0 +1,47 @@
+/* Next.js Django-inspired skin bridge. Styling only: do not change legacy business behavior. */
+:root{--navy:#264b5d!important;--navy-d:#1d3b4a!important;--navy-l:#417690!important;--bg:#f5f7f9!important;--line:#d6dee6!important;--line2:#e3e8ed!important;--txt:#202b36!important;--mut:#617182!important;--yel:#f0c75e!important;--green:#2e7d62!important;--red:#ba4545!important;--teal:#287f84!important;--orange:#b96b28!important;--blue:#417690!important}
+html,body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;background:#f5f7f9!important;color:#202b36!important}
+#hdr{background:#264b5d!important;padding:16px 24px!important;box-shadow:0 2px 7px #142e3c20}
+#hdr h1{font-size:21px!important;letter-spacing:-.02em}
+#hdr .sub,#hdrInfo{color:#d7e4eb!important}
+#toolbar{background:#fff!important;border-bottom:1px solid #d6dee6!important;padding:8px 16px!important}
+.tb{border-radius:7px!important;color:#405260!important;transition:background .15s ease}
+.tb:hover{background:#edf3f6!important}
+#tabs{background:#264b5d!important;padding:8px 12px 0!important;gap:4px!important}
+.tab{background:#264b5d!important;border-color:#1d3b4a!important;color:#dce8ee!important;border-radius:7px 7px 0 0!important;padding:9px 15px 10px!important}
+.tab:hover{background:#345f73!important}
+.tab.on{background:#f5f7f9!important;color:#264b5d!important;border-color:#d6dee6!important}
+#main{padding:20px 24px 64px!important;background:#f5f7f9!important}
+.panel{border:1px solid #d6dee6!important;border-radius:9px!important;background:#fff!important;box-shadow:0 2px 7px #20394b0b!important;overflow:hidden}
+.panel-h{background:#f7f9fb!important;color:#264b5d!important;border-bottom:1px solid #e3e8ed!important;padding:12px 16px!important;font-size:14px!important}
+.panel-b{padding:18px!important}
+.kcard{background:#fff!important;border:1px solid #dce3e9!important;border-radius:10px!important;padding:16px!important;box-shadow:0 2px 5px #20394b08!important}
+.kcard .kl{color:#617182!important;letter-spacing:.055em!important}
+.kcard .kv{color:#264b5d!important;font-size:27px!important}
+.inp{border:1px solid #cbd5df!important;border-radius:6px!important;padding:10px 12px!important;color:#202b36!important;background:#fff!important}
+.inp:focus{border-color:#417690!important;box-shadow:0 0 0 3px #41769020!important}
+label.fl{color:#344f60!important}
+.btn{border-radius:6px!important;transition:background .15s ease,box-shadow .15s ease!important}
+.btn:focus-visible,.tb:focus-visible,.tab:focus-visible{outline:3px solid #76a8c0!important;outline-offset:2px!important}
+.btn-navy{background:#417690!important;color:#fff!important}
+.btn-navy:hover{background:#315d73!important;box-shadow:0 2px 5px #264b5d20!important}
+.btn-w{background:#fff!important;border-color:#ccd6df!important;color:#344451!important}
+.btn-w:hover{background:#f3f6f8!important}
+.tbl{background:#fff!important}
+.tbl th{background:#f2f5f7!important;color:#425c6b!important;border-color:#dce3e9!important;font-weight:700!important}
+.tbl td{border-color:#e5eaee!important}
+.tbl tbody tr:hover{background:#f4f8fa!important}
+.pg{border-radius:6px!important;border-color:#d1dbe3!important}
+.pg.on{background:#417690!important;border-color:#417690!important}
+#moreMenu{border-color:#d6dee6!important;border-radius:9px!important;box-shadow:0 12px 30px #20394b24!important}
+#moreMenu button:hover{background:#f1f5f7!important}
+.win{border:1px solid #cbd6df!important;border-radius:10px!important;box-shadow:0 18px 50px #1a2e3d35!important;overflow:hidden}
+.win-h{background:#264b5d!important}
+.win-b{background:#fff!important}
+.win-f{background:#f7f9fb!important;border-top:1px solid #e3e8ed!important}
+.modal,.overlay{backdrop-filter:blur(2px)}
+input,select,textarea,button{font-family:inherit}
+a{color:#326b87}
+a:hover{color:#204b61}
+::-webkit-scrollbar-thumb{background:#c4d0d9!important;border:2px solid #f5f7f9!important}
+@media(max-width:760px){#hdr{padding:12px 14px!important}#hdr h1{font-size:17px!important}#main{padding:12px 10px 44px!important}.panel-b{padding:12px!important}.tab{padding:8px 11px!important;min-width:82px!important}.kcard{padding:12px!important}}
