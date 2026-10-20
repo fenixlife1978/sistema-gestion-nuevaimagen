@@ -211,6 +211,83 @@ body.controller-mode #tabs .tab svg{width:20px;height:20px}
 @media(max-width:600px){#hdr{padding:10px 12px;gap:10px}#hdr h1{font-size:15px}#clock{font-size:14px}#hdrInfo{font-size:11px}.tab{min-width:0;padding:6px 10px;font-size:11.5px}#main{padding:10px 8px 50px}.panel-b{padding:10px}.kcard{padding:10px}.filter-bar{flex-direction:column}.filter-bar>div{min-width:0;flex:1 1 100%}.btn{padding:7px 12px;font-size:12px}.qchips{grid-template-columns:1fr}.win{max-width:96vw}.kcard h3{font-size:14px}.kcard .kv{font-size:18px}.inp{max-width:100%}}
 @media(max-width:900px){.filter-bar{flex-wrap:wrap}.filter-bar>div{min-width:120px;flex:1 1 45%}.kcard{padding:10px 12px}.kcard .kv{font-size:20px}}
 </style>
+
+<!-- Django Admin-inspired visual skin. CSS-only: keeps existing DOM, IDs, handlers, CRUD and business logic intact. -->
+<style id="django-admin-skin">
+:root{
+ --navy:#417690;--navy-d:#264b5d;--navy-l:#205067;
+ --bg:#f8f8f8;--line:#d5d5d5;--line2:#e5e5e5;--txt:#333;
+ --mut:#666;--yel:#ffc;--green:#417690;--red:#ba2121;
+ --teal:#44b78b;--orange:#e09b24;--blue:#447e9b;
+}
+body{font-family:Arial,system-ui,sans-serif;background:#f8f8f8;color:#333;font-size:14px;line-height:1.5}
+#hdr{background:#417690;color:#fff;padding:16px 22px;border-bottom:4px solid #264b5d;box-shadow:none}
+#hdr h1{font-size:21px;font-weight:600;letter-spacing:.15px}
+#hdr .sub{color:#e1edf2}
+#hdrInfo{color:#f2f7f9}
+#clock{font-size:15px}
+.shield-img{border-radius:3px}
+#toolbar{background:#fff;border-bottom:1px solid #ddd;padding:8px 14px;gap:5px;box-shadow:0 1px 2px #00000008}
+.tb{color:#447e9b;border-radius:3px;min-width:68px;padding:7px 10px;font-size:12px;font-weight:600;transition:background .15s,color .15s}
+.tb:hover{background:#eaf2f5;color:#264b5d}
+#tabs{background:#264b5d;padding:7px 10px 0;gap:3px;border-bottom:1px solid #1d3d4b}
+.tab{background:#264b5d;color:#e5eef2;border:1px solid #1d3d4b;border-bottom:0;border-radius:4px 4px 0 0;padding:9px 14px;font-size:12px;font-weight:500;min-width:90px}
+.tab:hover{background:#35677d;color:#fff}
+.tab.on{background:#f8f8f8;color:#264b5d;border-color:#d5d5d5;font-weight:700}
+#main{padding:20px 22px 60px}
+.panel{background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 1px 2px #00000008;margin-bottom:18px}
+.panel-h{background:#f1f1f1;color:#264b5d;border-bottom:1px solid #ddd;padding:11px 15px;font-size:14px;font-weight:700}
+.panel-b{padding:17px}
+.kcard{background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 1px 2px #00000008;padding:15px 16px}
+.kcard .kl{color:#666;font-size:11px;letter-spacing:.55px}
+.kcard .kv{color:#264b5d;font-size:27px;font-weight:600}
+.kcard .ks{color:#666}
+.inp{background:#fff;border:1px solid #ccc;border-radius:3px;padding:9px 10px;color:#333;font:14px Arial,system-ui,sans-serif;box-shadow:inset 0 1px 2px #00000008}
+.inp:focus{border-color:#79aec8;box-shadow:0 0 0 2px #79aec833;outline:0}
+label.fl{color:#333;font-size:12px;font-weight:700}
+.btn{border-radius:3px;font-size:13px;font-weight:600;box-shadow:none;transition:background .15s,border-color .15s}
+.btn-navy{background:#417690;border-color:#417690;color:#fff}
+.btn-navy:hover{background:#264b5d;border-color:#264b5d}
+.btn-w{background:#f8f8f8;border-color:#ccc;color:#333}
+.btn-w:hover{background:#eee;border-color:#aaa}
+.btn-g{background:#44b78b;color:#fff}
+.btn-red{background:#ba2121;color:#fff}
+.tbl{background:#fff}
+.tbl th{background:#f1f1f1;color:#333;border-color:#ddd;font-size:11px;letter-spacing:.35px}
+.tbl td{border-color:#e5e5e5;color:#333}
+.tbl tbody tr:nth-child(even){background:#fcfcfc}
+.tbl tbody tr:hover{background:#edf5f8}
+.pg{border-radius:3px;border-color:#ccc;background:#fff;color:#447e9b}
+.pg.on{background:#417690;border-color:#417690;color:#fff}
+.chip{border-radius:3px}
+.rec-sel,.row10,.ck-it{border-color:#ddd;border-radius:3px}
+.rec-sel:hover,.rec-sel.on{background:#edf5f8;border-color:#79aec8;box-shadow:inset 3px 0 0 #417690}
+.pos,.uava{background:#417690;border-radius:3px}
+.pbar{background:#e5e5e5;border-radius:2px}
+.pbar i{background:#417690}
+.alert{border-radius:3px}
+#moreMenu{border-color:#ddd;border-radius:4px;box-shadow:0 4px 14px #0002}
+#moreMenu button{border-radius:3px;color:#447e9b}
+#moreMenu button:hover{background:#edf5f8;color:#264b5d}
+.lg-win{border:1px solid #ddd;border-radius:4px;box-shadow:0 8px 28px #0002;overflow:hidden;background:#fff}
+.lg-h{background:#417690;color:#fff;border-bottom:4px solid #264b5d}
+.lg-h .sub,.lg-h p{color:#e1edf2}
+.lg-b{background:#fff}
+#loading{background:#f8f8f8;color:#264b5d}
+::-webkit-scrollbar-thumb{background:#b9c8cf;border-radius:3px}
+@media(max-width:760px){
+ #hdr{padding:12px 14px}
+ #hdr h1{font-size:17px}
+ #toolbar{justify-content:flex-start}
+ #tabs{padding:6px 7px 0}
+ .tab{min-width:max-content;padding:8px 11px}
+ #main{padding:13px 10px 48px}
+ .panel-b{padding:12px}
+ .kcard{padding:12px}
+}
+@media(prefers-reduced-motion:reduce){.sec.on,.alert,.slot.f{animation:none!important}*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+</style>
+
 </head>
 <body>
 
